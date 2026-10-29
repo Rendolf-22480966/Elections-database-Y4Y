@@ -30,11 +30,36 @@ function pickValue(row: Record<string, unknown>, candidates: string[]) {
   return "";
 }
 
+function normalizeConstituencyToken(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, "and")
+    .replace(/[^a-zA-Z0-9\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizePersonName(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b([A-Za-z])([A-Za-z'-]*)\b/g, (match, first, rest) => first.toUpperCase() + rest.toLowerCase());
+}
+
 function findConstituencyName(raw: string) {
   const candidate = raw.trim();
   if (!candidate) return "Akwatia";
 
-  const match = DEMO_CONSTITUENCIES.find((item) => item.name.toLowerCase() === candidate.toLowerCase());
+  const normalizedCandidate = normalizeConstituencyToken(candidate);
+
+  const match = DEMO_CONSTITUENCIES.find((item) => {
+    const normalizedName = normalizeConstituencyToken(item.name);
+    const normalizedCode = normalizeConstituencyToken(item.code);
+    return normalizedName === normalizedCandidate || normalizedCode === normalizedCandidate || normalizedName.includes(normalizedCandidate) || normalizedCandidate.includes(normalizedName);
+  });
+
   return match?.name ?? candidate;
 }
 
@@ -56,7 +81,8 @@ async function findWorkbookFile() {
         .map((entry) => entry.name)
         .filter((fileName) => /\.(xlsx|xls|csv)$/i.test(fileName));
 
-      const preferred = candidates.find((fileName) => /election|youth|delegate|regional|region/i.test(fileName)) ?? candidates[0];
+      const preferredExact = candidates.find((fileName) => fileName.toLowerCase().includes("elections updated"));
+      const preferred = preferredExact ?? candidates.find((fileName) => /election|youth|delegate|regional|region/i.test(fileName)) ?? candidates[0];
       if (preferred) {
         return path.join(dir, preferred);
       }
@@ -129,7 +155,7 @@ export async function GET(request: Request) {
 
     const records: DemoRecord[] = rows
       .map((row, index) => {
-        const fullName = pickValue(row, [
+        const fullNameRaw = pickValue(row, [
           "__EMPTY",
           "full_name",
           "full name",
@@ -144,6 +170,7 @@ export async function GET(request: Request) {
           "person_name",
           "Name",
         ]);
+        const fullName = normalizePersonName(fullNameRaw);
         const rawConstituency = pickValue(row, [
           "Constituencies ",
           "Constituencies",
@@ -195,8 +222,13 @@ export async function GET(request: Request) {
 
         const normalizedPhone = normalizeGhanaPhone(rawPhone) ?? (rawPhone ? rawPhone.replace(/[\s()-]/g, "") : "");
         const constituencyName = findConstituencyName(rawConstituency);
+        const canonicalConstituencyName = DEMO_CONSTITUENCIES.find((item) => {
+          const itemName = normalizeConstituencyToken(item.name);
+          const candidateName = normalizeConstituencyToken(constituencyName);
+          return itemName === candidateName || itemName.includes(candidateName) || candidateName.includes(itemName);
+        })?.name ?? constituencyName;
         const constituency = DEMO_CONSTITUENCIES.find(
-          (item) => item.name.toLowerCase() === constituencyName.toLowerCase() || item.code.toLowerCase() === constituencyName.toLowerCase(),
+          (item) => item.name.toLowerCase() === canonicalConstituencyName.toLowerCase() || item.code.toLowerCase() === canonicalConstituencyName.toLowerCase(),
         );
 
         const fallbackConstituency = {
@@ -218,7 +250,7 @@ export async function GET(request: Request) {
           id: `import-${Date.now()}-${index}`,
           full_name: fullName,
           constituency_id: selectedConstituency.id,
-          constituency_name: selectedConstituency.name,
+          constituency_name: canonicalConstituencyName || selectedConstituency.name,
           phone: normalizedPhone,
           gender,
           verification_status: normalizeStatus(rawStatus || "pending"),

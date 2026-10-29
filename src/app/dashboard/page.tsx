@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { DEMO_CONSTITUENCIES, getDashboardSummary, getDemoRecords, saveDemoRecords, type DemoRecord } from "@/lib/demo-data";
 import { isSupabaseConfigured } from "@/lib/env";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { loadImportedRecords } from "@/lib/spreadsheet-import";
+import { loadImportedRecords, syncImportedRecordsToSupabase } from "@/lib/spreadsheet-import";
 
 type DashboardRow = {
   id: string;
@@ -31,6 +31,7 @@ export default function DashboardPage() {
   const loadData = async () => {
     const importedRecords = await loadImportedRecords();
     if (importedRecords.length > 0) {
+      await syncImportedRecordsToSupabase(importedRecords);
       saveDemoRecords(importedRecords);
       setRecords(importedRecords);
       return;

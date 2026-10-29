@@ -10,7 +10,7 @@ import { DEMO_CONSTITUENCIES, getDemoRecords, saveDemoRecords, type DemoRecord }
 import { isSupabaseConfigured } from "@/lib/env";
 import { normalizeGhanaPhone } from "@/lib/phone";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { loadImportedRecords } from "@/lib/spreadsheet-import";
+import { loadImportedRecords, syncImportedRecordsToSupabase } from "@/lib/spreadsheet-import";
 
 type SortKey = "full_name" | "constituency_name" | "phone" | "verification_status" | "created_at" | "updated_at";
 type SortDirection = "asc" | "desc";
@@ -162,6 +162,7 @@ export default function RecordsPage() {
     const loadRecords = async () => {
       const importedRecords = await loadImportedRecords();
       if (importedRecords.length > 0) {
+        await syncImportedRecordsToSupabase(importedRecords);
         saveDemoRecords(importedRecords);
         setRecords(importedRecords);
         return;
@@ -524,6 +525,9 @@ export default function RecordsPage() {
       });
 
       const merged = [...importedRecords, ...records];
+      if (isSupabaseConfigured()) {
+        await syncImportedRecordsToSupabase(merged);
+      }
       setRecords(merged);
       saveDemoRecords(merged);
       setSuccess(`${importedRecords.length} new records imported successfully.`);
