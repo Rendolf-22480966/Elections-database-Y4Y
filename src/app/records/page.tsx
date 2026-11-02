@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { DEMO_CONSTITUENCIES, getDemoRecords, saveDemoRecords, type DemoRecord } from "@/lib/demo-data";
+import { DEMO_CONSTITUENCIES, getDemoRecords, notifyDemoRecordsChanged, saveDemoRecords, type DemoRecord } from "@/lib/demo-data";
 import { isSupabaseConfigured } from "@/lib/env";
 import { normalizeGhanaPhone } from "@/lib/phone";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -195,13 +195,42 @@ export default function RecordsPage() {
       void loadRecords();
     };
 
+    const subscribeToRealtime = () => {
+      if (!isSupabaseConfigured()) {
+        return () => {};
+      }
+
+      const supabase = createBrowserSupabaseClient();
+      const channel = supabase
+        .channel("record-status-sync")
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "administrative_records",
+          },
+          () => {
+            void loadRecords();
+          },
+        )
+        .subscribe();
+
+      return () => {
+        void supabase.removeChannel(channel);
+      };
+    };
+
     void loadRecords();
     window.addEventListener("storage", refreshRecords);
     window.addEventListener("election-delegate-records-changed", refreshRecords);
 
+    const cleanupRealtime = subscribeToRealtime();
+
     return () => {
       window.removeEventListener("storage", refreshRecords);
       window.removeEventListener("election-delegate-records-changed", refreshRecords);
+      cleanupRealtime();
     };
   }, []);
 
@@ -245,8 +274,8 @@ export default function RecordsPage() {
   }, [searchTerm, statusFilter]);
 
   const updateRow = (id: string, field: keyof DemoRecord, value: string) => {
-    setRecords((current) =>
-      current.map((record) => {
+    setRecords((current) => {
+      const nextRows = current.map((record) => {
         if (record.id !== id) {
           return record;
         }
@@ -256,8 +285,76 @@ export default function RecordsPage() {
           next.updated_at = new Date().toISOString();
         }
         return next;
-      }),
-    );
+      });
+
+      const changedRow = nextRows.find((record) => record.id === id);
+      if (field === "verification_status" && changedRow) {
+        const rowToPersist = {
+          ...changedRow,
+          full_name: changedRow.full_name.trim(),
+          phone: normalizePhoneValue(changedRow.phone),
+          admin_note: changedRow.admin_note.trim(),
+          constituency_name: getConstituencyNameById(changedRow.constituency_id, constituencyOptions),
+          updated_at: new Date().toISOString(),
+        };
+
+        const persistStatusChange = async () => {
+          if (isSupabaseConfigured()) {
+            try {
+              const supabase = createBrowserSupabaseClient();
+              const { error } = await supabase.from("administrative_records").upsert(
+                {
+                  id: isValidUuid(rowToPersist.id) ? rowToPersist.id : getRandomRecordId(),
+                  full_name: rowToPersist.full_name,
+                  constituency_id: rowToPersist.constituency_id,
+                  phone_e164: normalizePhoneValue(rowToPersist.phone),
+                  gender: rowToPersist.gender || null,
+                  verification_status: rowToPersist.verification_status,
+                  admin_note: rowToPersist.admin_note || null,
+                  created_by: rowToPersist.created_by || "admin-1",
+                  updated_by: rowToPersist.created_by || "admin-1",
+                  created_at: rowToPersist.created_at,
+                  updated_at: rowToPersist.updated_at,
+                },
+                { onConflict: "id" },
+              );
+
+              if (error) {
+                setError(error.message);
+                return;
+              }
+
+              const { data, error: queryError } = await supabase
+                .from("administrative_records")
+                .select("id, full_name, constituency_id, phone_e164, gender, verification_status, admin_note, created_at, updated_at, constituencies(name)")
+                .order("created_at", { ascending: false });
+
+              if (queryError) {
+                setError(queryError.message);
+                return;
+              }
+
+              const refreshedRecords = mapSupabaseRows(data as LiveRecordRow[]);
+              setRecords(refreshedRecords);
+              saveDemoRecords(refreshedRecords);
+              notifyDemoRecordsChanged();
+              return;
+            } catch (errorObject) {
+              const message = errorObject instanceof Error ? errorObject.message : "Unable to update status.";
+              setError(message);
+              return;
+            }
+          }
+
+          saveDemoRecords(nextRows);
+          notifyDemoRecordsChanged();
+        };
+
+        void persistStatusChange();
+      }
+
+      return nextRows;
+    });
   };
 
   const handleAddRecord = async () => {
@@ -347,6 +444,7 @@ export default function RecordsPage() {
         const refreshedRecords = mapSupabaseRows(data as LiveRecordRow[]);
         setRecords(refreshedRecords);
         saveDemoRecords(refreshedRecords);
+        notifyDemoRecordsChanged();
         setForm({ ...EMPTY_FORM, constituency_id: constituencyOptions[0]?.id ?? EMPTY_FORM.constituency_id });
         setError("");
         setSuccess("New delegate added to the live database.");
@@ -358,6 +456,7 @@ export default function RecordsPage() {
 
     setRecords(nextRecords);
     saveDemoRecords(nextRecords);
+    notifyDemoRecordsChanged();
     setForm(EMPTY_FORM);
     setError("");
     setSuccess("New delegate added to the working dataset.");
@@ -431,12 +530,14 @@ export default function RecordsPage() {
         const refreshedRecords = mapSupabaseRows(data as LiveRecordRow[]);
         setRecords(refreshedRecords);
         saveDemoRecords(refreshedRecords);
+        notifyDemoRecordsChanged();
         setSuccess("Changes saved to the database successfully.");
         return;
       }
 
       setRecords(normalizedRows);
       saveDemoRecords(normalizedRows);
+      notifyDemoRecordsChanged();
       setSuccess("Changes saved successfully.");
     } finally {
       setIsSaving(false);
@@ -457,6 +558,7 @@ export default function RecordsPage() {
 
     setRecords(nextRecords);
     saveDemoRecords(nextRecords);
+    notifyDemoRecordsChanged();
     setSuccess("Record removed from the working list.");
   };
 
@@ -528,7 +630,7 @@ export default function RecordsPage() {
           constituency_id: constituency?.id ?? DEMO_CONSTITUENCIES[0].id,
           constituency_name: constituency?.name ?? DEMO_CONSTITUENCIES[0].name,
           phone,
-          gender: genderValue || "",
+          gender: (genderValue || "") as DemoRecord["gender"],
           verification_status: verificationStatus,
           admin_note: String(row.admin_note ?? row["Administrative Note"] ?? "").trim(),
           created_by: "admin-1",
@@ -543,6 +645,7 @@ export default function RecordsPage() {
       }
       setRecords(merged);
       saveDemoRecords(merged);
+      notifyDemoRecordsChanged();
       setSuccess(`${importedRecords.length} new records imported successfully.`);
       setImportPreview([]);
     } catch (errorObject) {
@@ -621,7 +724,7 @@ export default function RecordsPage() {
                 <select
                   id="new-gender"
                   value={form.gender}
-                  onChange={(event) => setForm((current) => ({ ...current, gender: event.target.value }))}
+                  onChange={(event) => setForm((current) => ({ ...current, gender: event.target.value as DemoRecord["gender"] }))}
                   className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/30"
                 >
                   <option value="">Select gender</option>

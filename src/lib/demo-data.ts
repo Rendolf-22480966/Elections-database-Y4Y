@@ -282,7 +282,6 @@ export function notifyDemoRecordsChanged() {
 export function saveDemoRecords(records: DemoRecord[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(DEMO_RECORDS_KEY, JSON.stringify(records));
-  notifyDemoRecordsChanged();
 }
 
 export function getDashboardSummary(records: DemoRecord[]): DashboardSummary {

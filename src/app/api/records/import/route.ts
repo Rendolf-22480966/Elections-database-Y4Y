@@ -262,7 +262,7 @@ export async function GET(request: Request) {
 
         return record;
       })
-      .filter((record): record is DemoRecord => Boolean(record) && Boolean(record.full_name));
+      .filter((record): record is DemoRecord => record !== null && Boolean(record.full_name));
 
     return NextResponse.json({ records, source: path.basename(filePath) }, { status: 200 });
   } catch (error) {

@@ -80,13 +80,42 @@ export default function DashboardPage() {
       void loadData();
     };
 
+    const subscribeToRealtime = () => {
+      if (!isSupabaseConfigured()) {
+        return () => {};
+      }
+
+      const supabase = createBrowserSupabaseClient();
+      const channel = supabase
+        .channel("dashboard-records-changes")
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "administrative_records",
+          },
+          () => {
+            void loadData();
+          },
+        )
+        .subscribe();
+
+      return () => {
+        void supabase.removeChannel(channel);
+      };
+    };
+
     void loadData();
     window.addEventListener("storage", refreshRecords);
     window.addEventListener("election-delegate-records-changed", refreshRecords);
 
+    const cleanupRealtime = subscribeToRealtime();
+
     return () => {
       window.removeEventListener("storage", refreshRecords);
       window.removeEventListener("election-delegate-records-changed", refreshRecords);
+      cleanupRealtime();
     };
   }, []);
 
