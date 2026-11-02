@@ -191,7 +191,18 @@ export default function RecordsPage() {
       setRecords(getDemoRecords());
     };
 
+    const refreshRecords = () => {
+      void loadRecords();
+    };
+
     void loadRecords();
+    window.addEventListener("storage", refreshRecords);
+    window.addEventListener("election-delegate-records-changed", refreshRecords);
+
+    return () => {
+      window.removeEventListener("storage", refreshRecords);
+      window.removeEventListener("election-delegate-records-changed", refreshRecords);
+    };
   }, []);
 
   useEffect(() => {
@@ -333,7 +344,9 @@ export default function RecordsPage() {
           return;
         }
 
-        setRecords(mapSupabaseRows(data as LiveRecordRow[]));
+        const refreshedRecords = mapSupabaseRows(data as LiveRecordRow[]);
+        setRecords(refreshedRecords);
+        saveDemoRecords(refreshedRecords);
         setForm({ ...EMPTY_FORM, constituency_id: constituencyOptions[0]?.id ?? EMPTY_FORM.constituency_id });
         setError("");
         setSuccess("New delegate added to the live database.");
@@ -415,7 +428,9 @@ export default function RecordsPage() {
           return;
         }
 
-        setRecords(mapSupabaseRows(data as LiveRecordRow[]));
+        const refreshedRecords = mapSupabaseRows(data as LiveRecordRow[]);
+        setRecords(refreshedRecords);
+        saveDemoRecords(refreshedRecords);
         setSuccess("Changes saved to the database successfully.");
         return;
       }
@@ -441,9 +456,7 @@ export default function RecordsPage() {
     }
 
     setRecords(nextRecords);
-    if (!isSupabaseConfigured()) {
-      saveDemoRecords(nextRecords);
-    }
+    saveDemoRecords(nextRecords);
     setSuccess("Record removed from the working list.");
   };
 

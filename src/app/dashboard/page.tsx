@@ -76,7 +76,18 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
+    const refreshRecords = () => {
+      void loadData();
+    };
+
     void loadData();
+    window.addEventListener("storage", refreshRecords);
+    window.addEventListener("election-delegate-records-changed", refreshRecords);
+
+    return () => {
+      window.removeEventListener("storage", refreshRecords);
+      window.removeEventListener("election-delegate-records-changed", refreshRecords);
+    };
   }, []);
 
   const summary = useMemo(() => getDashboardSummary(records), [records]);
