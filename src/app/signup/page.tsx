@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,11 +20,11 @@ export default function SignupPage() {
   });
   const [error, setError] = useState("");
 
-  const handleChange = (field: keyof typeof form, value: string) => {
+  const handleChange = <K extends keyof typeof form>(field: K, value: (typeof form)[K]) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!form.name.trim() || !form.email.trim() || form.password.length < 8) {
@@ -112,7 +112,7 @@ export default function SignupPage() {
             <select
               id="role"
               value={form.role}
-              onChange={(event) => handleChange("role", event.target.value)}
+              onChange={(event) => handleChange("role", event.target.value as "administrator" | "campaign_manager" | "executive_viewer")}
               className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/30"
             >
               <option value="campaign_manager">Campaign manager</option>

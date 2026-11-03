@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
@@ -75,7 +77,7 @@ async function findWorkbookFile() {
 
   for (const dir of dirs) {
     try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
+      const entries = await fs.readdir(/* turbopackIgnore: true */ dir, { withFileTypes: true });
       const candidates = entries
         .filter((entry) => entry.isFile())
         .map((entry) => entry.name)
@@ -84,7 +86,7 @@ async function findWorkbookFile() {
       const preferredExact = candidates.find((fileName) => fileName.toLowerCase().includes("elections updated"));
       const preferred = preferredExact ?? candidates.find((fileName) => /election|youth|delegate|regional|region/i.test(fileName)) ?? candidates[0];
       if (preferred) {
-        return path.join(dir, preferred);
+        return path.join(/* turbopackIgnore: true */ dir, preferred);
       }
     } catch {
       // Ignore unreadable directories and keep scanning.
@@ -92,10 +94,10 @@ async function findWorkbookFile() {
   }
 
   const root = process.cwd();
-  const fallbackMatches = await fs.readdir(root, { withFileTypes: true }).catch(() => []).then((entries) =>
+  const fallbackMatches = await fs.readdir(/* turbopackIgnore: true */ root, { withFileTypes: true }).catch(() => []).then((entries) =>
     entries
       .filter((entry) => entry.isFile() && /\.(xlsx|xls|csv)$/i.test(entry.name))
-      .map((entry) => path.join(root, entry.name)),
+      .map((entry) => path.join(/* turbopackIgnore: true */ root, entry.name)),
   );
 
   return fallbackMatches[0] ?? null;
@@ -129,7 +131,7 @@ export async function GET(request: Request) {
     }
 
     const readableFilePath = await getReadableWorkbookPath(filePath);
-    const fileBuffer = await fs.readFile(readableFilePath);
+    const fileBuffer = await fs.readFile(/* turbopackIgnore: true */ readableFilePath);
     const workbook = XLSX.read(fileBuffer, { type: "buffer" });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];

@@ -316,6 +316,16 @@ export function getDemoRecords(): DemoRecord[] {
       window.localStorage.setItem(DEMO_RECORDS_KEY, JSON.stringify(sanitized));
     }
     return sanitized;
+  } catch {
+    return DEMO_RECORDS;
+  }
+}
+
+export function notifyDemoRecordsChanged() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("election-delegate-records-changed"));
+}
+
 export function saveDemoRecords(records: DemoRecord[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(DEMO_RECORDS_KEY, JSON.stringify(records));
