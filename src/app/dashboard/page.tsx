@@ -1,19 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
-import { DEMO_CONSTITUENCIES, getDashboardSummary, getDemoRecords, saveDemoRecords, type DemoRecord } from "@/lib/demo-data";
+import { DEMO_CONSTITUENCIES, getDashboardSummary, getDemoRecords, type DemoRecord } from "@/lib/demo-data";
 import { isSupabaseConfigured } from "@/lib/env";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { loadImportedRecords, syncImportedRecordsToSupabase } from "@/lib/spreadsheet-import";
 
 type DashboardRow = {
   id: string;
   full_name: string;
   phone_e164: string | null;
   gender: string | null;
-  verification_status: "verified" | "pending" | "requires_correction";
+  verification_status: "green" | "yellow" | "red";
   created_at: string;
   constituencies: { name: string }[] | null;
 };
@@ -28,15 +27,7 @@ export default function DashboardPage() {
   const [records, setRecords] = useState<DemoRecord[]>([]);
   const [constituencyOptions, setConstituencyOptions] = useState<ConstituencyOption[]>(DEMO_CONSTITUENCIES);
 
-  const loadData = async () => {
-    const importedRecords = await loadImportedRecords();
-    if (importedRecords.length > 0) {
-      await syncImportedRecordsToSupabase(importedRecords);
-      saveDemoRecords(importedRecords);
-      setRecords(importedRecords);
-      return;
-    }
-
+  const loadData = useCallback(async () => {
     if (isSupabaseConfigured()) {
       const supabase = createBrowserSupabaseClient();
       const [{ data, error }, { data: constituencyData, error: constituencyError }] = await Promise.all([
@@ -44,7 +35,7 @@ export default function DashboardPage() {
           .from("administrative_records")
           .select("id, full_name, phone_e164, gender, verification_status, created_at, constituencies(name)")
           .order("created_at", { ascending: false })
-          .limit(20),
+          .limit(50),
         supabase.from("constituencies").select("id, name, code").order("name"),
       ]);
 
@@ -52,7 +43,7 @@ export default function DashboardPage() {
         setConstituencyOptions(constituencyData.map((row) => ({ id: row.id, name: row.name, code: row.code })));
       }
 
-      if (!error && data) {
+      if (!error && data && data.length > 0) {
         const mapped = data.map((row: DashboardRow) => ({
           id: row.id,
           full_name: row.full_name,
@@ -73,10 +64,15 @@ export default function DashboardPage() {
     }
 
     setRecords(getDemoRecords());
-  };
+  }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
     const refreshRecords = () => {
+      if (!isMounted) {
+        return;
+      }
       void loadData();
     };
 
@@ -96,7 +92,22 @@ export default function DashboardPage() {
             table: "administrative_records",
           },
           () => {
-            void loadData();
+            if (isMounted) {
+              void loadData();
+            }
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "constituencies",
+          },
+          () => {
+            if (isMounted) {
+              void loadData();
+            }
           },
         )
         .subscribe();
@@ -113,6 +124,7 @@ export default function DashboardPage() {
     const cleanupRealtime = subscribeToRealtime();
 
     return () => {
+      isMounted = false;
       window.removeEventListener("storage", refreshRecords);
       window.removeEventListener("election-delegate-records-changed", refreshRecords);
       cleanupRealtime();
@@ -178,9 +190,9 @@ export default function DashboardPage() {
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Total delegates" value={summary.total.toString()} accent="blue" />
-        <StatCard label="Verified" value={summary.verified.toString()} accent="green" />
-        <StatCard label="Pending" value={summary.pending.toString()} accent="amber" />
-        <StatCard label="Needs correction" value={summary.correction.toString()} accent="red" />
+        <StatCard label="GREEN" value={summary.green.toString()} accent="green" />
+        <StatCard label="YELLOW" value={summary.yellow.toString()} accent="amber" />
+        <StatCard label="RED" value={summary.red.toString()} accent="red" />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1.55fr_0.95fr]">
@@ -219,21 +231,21 @@ export default function DashboardPage() {
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-semibold text-slate-900">Verification status</p>
+          <p className="text-sm font-semibold text-slate-900">Status heat map</p>
           <div className="mt-4 space-y-4">
             {summary.byStatus.map((item) => {
               const total = Math.max(summary.total, 1);
               const share = Math.round((item.count / total) * 100);
               const colorMap = {
-                verified: "bg-emerald-500",
-                pending: "bg-amber-500",
-                requires_correction: "bg-red-500",
+                green: "bg-emerald-500",
+                yellow: "bg-amber-500",
+                red: "bg-red-500",
               } as const;
 
               return (
                 <div key={item.status}>
                   <div className="mb-1 flex items-center justify-between text-sm">
-                    <span className="capitalize text-slate-700">{item.status.replace("_", " ")}</span>
+                    <span className="font-semibold uppercase tracking-[0.12em] text-slate-700">{item.status}</span>
                     <span className="font-semibold text-slate-800">{item.count}</span>
                   </div>
                   <div className="h-2.5 rounded-full bg-slate-100">
@@ -270,7 +282,7 @@ export default function DashboardPage() {
                     <div key={record.id} className="rounded-xl border border-slate-200 bg-white p-4">
                       <div className="mb-3 flex items-center justify-between gap-2">
                         <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${statusTone.badge}`}>
-                          {record.verification_status.replace("_", " ")}
+                          {record.verification_status.toUpperCase()}
                         </span>
                       </div>
 
@@ -291,7 +303,7 @@ export default function DashboardPage() {
                         <div>
                           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Status</p>
                           <p className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-medium ${statusTone.text}`}>
-                            {record.verification_status.replace("_", " ")}
+                            {record.verification_status.toUpperCase()}
                           </p>
                         </div>
                       </div>
@@ -328,17 +340,17 @@ function getConstituencyShortName(name: string): string {
 
 function getStatusTone(status: DemoRecord["verification_status"]) {
   switch (status) {
-    case "verified":
+    case "green":
       return {
         badge: "bg-emerald-100 text-emerald-700",
         text: "bg-emerald-50 text-emerald-700",
       };
-    case "pending":
+    case "yellow":
       return {
         badge: "bg-amber-100 text-amber-700",
         text: "bg-amber-50 text-amber-700",
       };
-    case "requires_correction":
+    case "red":
       return {
         badge: "bg-red-100 text-red-700",
         text: "bg-red-50 text-red-700",

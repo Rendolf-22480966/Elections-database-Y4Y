@@ -67,9 +67,9 @@ function findConstituencyName(raw: string) {
 
 function normalizeStatus(value: string): DemoRecord["verification_status"] {
   const cleaned = value.toLowerCase().trim();
-  if (cleaned.includes("verified")) return "verified";
-  if (cleaned.includes("requires") || cleaned.includes("correction")) return "requires_correction";
-  return "pending";
+  if (cleaned.includes("verified") || cleaned.includes("green")) return "green";
+  if (cleaned.includes("requires") || cleaned.includes("correction") || cleaned.includes("red") || cleaned.includes("needs") && cleaned.includes("correction")) return "red";
+  return "yellow";
 }
 
 async function findWorkbookFile() {
@@ -255,7 +255,7 @@ export async function GET(request: Request) {
           constituency_name: canonicalConstituencyName || selectedConstituency.name,
           phone: normalizedPhone,
           gender,
-          verification_status: normalizeStatus(rawStatus || "pending"),
+          verification_status: normalizeStatus(rawStatus || "yellow"),
           admin_note: rawNote || `${constituencyName} officer`,
           created_by: "system-import",
           created_at: new Date().toISOString(),

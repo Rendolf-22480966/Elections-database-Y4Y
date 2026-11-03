@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
 
+import { normalizeDemoStatus } from "@/lib/demo-data";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
-const VALID_STATUS_VALUES = new Set(["pending", "verified", "requires_correction"]);
+const VALID_STATUS_VALUES = new Set(["green", "yellow", "red"]);
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await context.params;
     const payload = (await request.json().catch(() => ({}))) as { verification_status?: string };
-    const verificationStatus = payload.verification_status?.trim();
+    const normalizedStatus = normalizeDemoStatus(payload.verification_status);
 
-    if (!verificationStatus || !VALID_STATUS_VALUES.has(verificationStatus)) {
+    if (!VALID_STATUS_VALUES.has(normalizedStatus)) {
       return NextResponse.json({ error: "A valid verification status is required." }, { status: 400 });
     }
 
@@ -31,7 +32,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const { data, error } = await supabase
       .from("administrative_records")
       .update({
-        verification_status: verificationStatus,
+        verification_status: normalizedStatus,
         updated_by: user.id,
         updated_at: new Date().toISOString(),
       })

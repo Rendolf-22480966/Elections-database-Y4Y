@@ -2,7 +2,7 @@ import { z } from "zod";
 import { normalizeGhanaPhone } from "@/lib/phone";
 import { ROLES } from "@/lib/roles";
 
-export const verificationStatuses = ["verified", "pending", "requires_correction"] as const;
+export const verificationStatuses = ["green", "yellow", "red"] as const;
 export const genders = ["female", "male", "other", "prefer_not_to_say"] as const;
 
 const nameSchema = z

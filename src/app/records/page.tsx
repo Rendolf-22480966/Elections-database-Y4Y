@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { DEMO_CONSTITUENCIES, getDemoRecords, notifyDemoRecordsChanged, saveDemoRecords, type DemoRecord } from "@/lib/demo-data";
+import { DEMO_CONSTITUENCIES, getDemoRecords, notifyDemoRecordsChanged, normalizeDemoStatus, saveDemoRecords, type DemoRecord, type DemoStatus } from "@/lib/demo-data";
 import { isSupabaseConfigured } from "@/lib/env";
 import { normalizeGhanaPhone } from "@/lib/phone";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -15,7 +15,7 @@ import { loadImportedRecords, syncImportedRecordsToSupabase } from "@/lib/spread
 
 type SortKey = "full_name" | "constituency_name" | "phone" | "verification_status" | "created_at" | "updated_at";
 type SortDirection = "asc" | "desc";
-type StatusFilter = "all" | "verified" | "pending" | "requires_correction";
+type StatusFilter = "all" | DemoStatus;
 
 type ImportPreviewRow = {
   rowNumber: number;
@@ -46,7 +46,7 @@ const EMPTY_FORM: RecordFormValues = {
   constituency_id: DEMO_CONSTITUENCIES[0]?.id ?? "",
   phone: "",
   gender: "",
-  verification_status: "pending",
+  verification_status: "yellow",
   admin_note: "",
 };
 
@@ -67,10 +67,11 @@ function normalizePhoneValue(value: string) {
   return normalizeGhanaPhone(value.trim()) ?? "";
 }
 
-const VALID_STATUS_VALUES = ["verified", "pending", "requires_correction"] as const;
+const VALID_STATUS_VALUES = ["green", "yellow", "red"] as const;
 
 function isValidStatusValue(value: string): value is DemoRecord["verification_status"] {
-  return VALID_STATUS_VALUES.includes(value as DemoRecord["verification_status"]);
+  const normalized = normalizeDemoStatus(value);
+  return VALID_STATUS_VALUES.includes(normalized);
 }
 
 function isValidUuid(value: string) {
@@ -150,7 +151,7 @@ function validateDraft(record: DemoRecord, allRecords: DemoRecord[], currentId?:
     return "Enter a valid Ghana mobile number.";
   }
 
-  if (!record.verification_status || !["verified", "pending", "requires_correction"].includes(record.verification_status)) {
+  if (!record.verification_status || !VALID_STATUS_VALUES.includes(normalizeDemoStatus(record.verification_status))) {
     return "Choose a valid verification status.";
   }
 
@@ -170,7 +171,7 @@ function mapSupabaseRows(rows: LiveRecordRow[]): DemoRecord[] {
     constituency_name: row.constituencies?.[0]?.name ?? "Unassigned",
     phone: row.phone_e164 ?? "",
     gender: (row.gender as DemoRecord["gender"]) ?? "",
-    verification_status: row.verification_status,
+    verification_status: normalizeDemoStatus(row.verification_status),
     admin_note: row.admin_note ?? "",
     created_by: "supabase",
     created_at: row.created_at,
@@ -219,7 +220,7 @@ export default function RecordsPage() {
           setConstituencyOptions(constituencyData.map((row) => ({ id: row.id, name: row.name, code: row.code })));
         }
 
-        if (!queryError && data) {
+        if (!queryError && data && data.length > 0) {
           setRecords(mapSupabaseRows(data as LiveRecordRow[]));
           return;
         }
@@ -341,8 +342,9 @@ export default function RecordsPage() {
       return;
     }
 
+    const normalizedStatus = normalizeDemoStatus(nextStatus);
     const previousSnapshot = records.find((record) => record.id === recordId);
-    const optimisticRecords = records.map((record) => (record.id === recordId ? { ...record, verification_status: nextStatus, updated_at: new Date().toISOString() } : record));
+    const optimisticRecords = records.map((record) => (record.id === recordId ? { ...record, verification_status: normalizedStatus, updated_at: new Date().toISOString() } : record));
 
     setRecords(optimisticRecords);
     saveDemoRecords(optimisticRecords);
@@ -354,7 +356,7 @@ export default function RecordsPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ verification_status: nextStatus }),
+        body: JSON.stringify({ verification_status: normalizedStatus }),
       });
 
       const payload = (await response.json().catch(() => ({}))) as { error?: string; record?: { verification_status?: DemoRecord["verification_status"]; updated_at?: string } };
@@ -369,7 +371,7 @@ export default function RecordsPage() {
 
         return {
           ...record,
-          verification_status: payload.record?.verification_status ?? nextStatus,
+          verification_status: normalizeDemoStatus(payload.record?.verification_status ?? normalizedStatus),
           updated_at: payload.record?.updated_at ?? new Date().toISOString(),
         };
       });
@@ -421,7 +423,7 @@ export default function RecordsPage() {
       constituency_name: getConstituencyNameById(resolvedConstituencyId, constituencyOptions),
       phone: normalizedPhone,
       gender: form.gender as DemoRecord["gender"],
-      verification_status: form.verification_status,
+      verification_status: normalizeDemoStatus(form.verification_status),
       admin_note: form.admin_note.trim(),
       created_by: "admin-1",
       created_at: new Date().toISOString(),
@@ -455,7 +457,7 @@ export default function RecordsPage() {
           constituency_id: getSafeUuid(candidate.constituency_id) ?? constituencyOptions[0]?.id ?? null,
           phone_e164: normalizePhoneValue(candidate.phone),
           gender: candidate.gender || null,
-          verification_status: candidate.verification_status,
+          verification_status: normalizeDemoStatus(candidate.verification_status),
           admin_note: candidate.admin_note || null,
           created_by: user.id,
           updated_by: user.id,
@@ -542,7 +544,7 @@ export default function RecordsPage() {
           constituency_id: getSafeUuid(row.constituency_id) ?? constituencyOptions[0]?.id ?? null,
           phone_e164: normalizePhoneValue(row.phone),
           gender: row.gender || null,
-          verification_status: row.verification_status,
+          verification_status: normalizeDemoStatus(row.verification_status),
           admin_note: row.admin_note || null,
           created_by: getSafeUuid(row.created_by) ?? user.id,
           updated_by: user.id,
@@ -625,7 +627,7 @@ export default function RecordsPage() {
           full_name: String(row.full_name ?? row.name ?? row["Full Name"] ?? "").trim(),
           constituency: String(row.constituency ?? row["Constituency"] ?? "").trim(),
           phone: String(row.phone ?? row.telephone ?? row["Telephone Number"] ?? "").trim(),
-          status: String(row.verification_status ?? row.status ?? row["Verification Status"] ?? "pending").trim(),
+          status: String(row.verification_status ?? row.status ?? row["Verification Status"] ?? "yellow").trim(),
           gender: String(row.gender ?? row["Gender"] ?? "").trim(),
           note: String(row.admin_note ?? row["Administrative Note"] ?? "").trim(),
         };
@@ -646,8 +648,9 @@ export default function RecordsPage() {
         const fullName = String(row.full_name ?? row.name ?? row["Full Name"] ?? "").trim();
         const constituency = String(row.constituency ?? row["Constituency"] ?? "").trim();
         const phone = String(row.phone ?? row.telephone ?? row["Telephone Number"] ?? "").trim();
-        const status = String(row.verification_status ?? row.status ?? row["Verification Status"] ?? "pending").trim();
-        return Boolean(fullName) && Boolean(DEMO_CONSTITUENCIES.find((item) => item.name.toLowerCase() === constituency.toLowerCase())) && Boolean(normalizePhoneValue(phone)) && ["verified", "pending", "requires_correction"].includes(status.toLowerCase() === "requires correction" ? "requires_correction" : status.toLowerCase());
+        const status = String(row.verification_status ?? row.status ?? row["Verification Status"] ?? "yellow").trim();
+        const normalizedStatus = normalizeDemoStatus(status);
+        return Boolean(fullName) && Boolean(DEMO_CONSTITUENCIES.find((item) => item.name.toLowerCase() === constituency.toLowerCase())) && Boolean(normalizePhoneValue(phone)) && VALID_STATUS_VALUES.includes(normalizedStatus);
       });
 
       setImportPreview(preview);
@@ -663,8 +666,8 @@ export default function RecordsPage() {
         const constituency = DEMO_CONSTITUENCIES.find((item) => item.name.toLowerCase() === constituencyName.toLowerCase());
         const phone = normalizePhoneValue(String(row.phone ?? row.telephone ?? row["Telephone Number"] ?? ""));
         const genderValue = String(row.gender ?? row["Gender"] ?? "").trim();
-        const rawStatus = String(row.verification_status ?? row.status ?? row["Verification Status"] ?? "pending").trim();
-        const verificationStatus = rawStatus.toLowerCase() === "requires correction" ? "requires_correction" : rawStatus.toLowerCase() as DemoRecord["verification_status"];
+        const rawStatus = String(row.verification_status ?? row.status ?? row["Verification Status"] ?? "yellow").trim();
+        const verificationStatus = normalizeDemoStatus(rawStatus) as DemoRecord["verification_status"];
 
         return {
           id: `import-${Date.now()}-${index}`,
@@ -785,9 +788,9 @@ export default function RecordsPage() {
                   onChange={(event) => setForm((current) => ({ ...current, verification_status: event.target.value as DemoRecord["verification_status"] }))}
                   className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/30"
                 >
-                  <option value="pending">Pending</option>
-                  <option value="verified">Verified</option>
-                  <option value="requires_correction">Requires correction</option>
+                  <option value="yellow">Yellow</option>
+                  <option value="green">Green</option>
+                  <option value="red">Red</option>
                 </select>
               </div>
             </div>
@@ -822,9 +825,9 @@ export default function RecordsPage() {
               className="flex h-10 min-w-[180px] rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/30"
             >
               <option value="all">All statuses</option>
-              <option value="verified">Verified</option>
-              <option value="pending">Pending</option>
-              <option value="requires_correction">Requires correction</option>
+              <option value="green">Green</option>
+              <option value="yellow">Yellow</option>
+              <option value="red">Red</option>
             </select>
           </div>
 
@@ -914,9 +917,9 @@ export default function RecordsPage() {
                           }}
                           className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/30"
                         >
-                          <option value="pending">Pending</option>
-                          <option value="verified">Verified</option>
-                          <option value="requires_correction">Requires correction</option>
+                          <option value="yellow">Yellow</option>
+                          <option value="green">Green</option>
+                          <option value="red">Red</option>
                         </select>
                       </td>
                       <td className="px-3 py-2 text-slate-600">
@@ -980,7 +983,7 @@ export default function RecordsPage() {
                     <td className="px-3 py-2">{row.values.full_name || "—"}</td>
                     <td className="px-3 py-2">{row.values.constituency || "—"}</td>
                     <td className="px-3 py-2">{row.values.phone || "—"}</td>
-                    <td className="px-3 py-2">{row.values.status || "pending"}</td>
+                    <td className="px-3 py-2">{row.values.status || "yellow"}</td>
                     <td className="px-3 py-2 text-xs text-slate-600">{row.valid ? "Ready" : row.issue}</td>
                   </tr>
                 ))}

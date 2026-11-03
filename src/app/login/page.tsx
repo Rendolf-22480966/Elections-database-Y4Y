@@ -7,39 +7,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getDemoUserByEmail, saveDemoSession } from "@/lib/demo-data";
-import { isSupabaseConfigured } from "@/lib/env";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("rendolfagyemang2@gmail.com");
-  const [password, setPassword] = useState("Rendolf488$");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const configured = isSupabaseConfigured();
+    const trimmedEmail = email.trim();
+    const trimmedPassword = password.trim();
+    const user = getDemoUserByEmail(trimmedEmail);
 
-    if (configured) {
-      const supabase = createBrowserSupabaseClient();
-      const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (authError || !data.user) {
-        setError(authError?.message ?? "Unable to sign in with Supabase.");
-        return;
-      }
-
-      router.push("/dashboard");
-      return;
-    }
-
-    const user = getDemoUserByEmail(email);
-
-    if (!user || user.password !== password) {
+    if (!user || user.password !== trimmedPassword) {
       setError("Incorrect email or password.");
       return;
     }
@@ -51,7 +33,7 @@ export default function LoginPage() {
       role: user.role,
     });
 
-    router.push("/dashboard");
+    router.push(user.role === "administrator" ? "/admin" : "/dashboard");
   };
 
   return (
@@ -122,12 +104,23 @@ export default function LoginPage() {
               </Button>
             </form>
 
-            <p className="mt-6 text-center text-sm text-slate-600">
-              Don’t have an account? {" "}
-              <Link href="/signup" className="font-semibold text-[#a77a2c] transition hover:text-[#8d6325]">
-                Create one
-              </Link>
-            </p>
+            <div className="mt-6 flex flex-col gap-3">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => router.push("/admin-login")}
+                className="h-11 w-full rounded-xl border border-[#d9caa8] bg-[#f8f1e3] text-sm font-semibold text-[#7a5a1e] hover:bg-[#f2e8d3]"
+              >
+                Admin only
+              </Button>
+
+              <p className="text-center text-sm text-slate-600">
+                Don’t have an account? {" "}
+                <Link href="/signup" className="font-semibold text-[#a77a2c] transition hover:text-[#8d6325]">
+                  Create one
+                </Link>
+              </p>
+            </div>
           </div>
         </div>
       </div>

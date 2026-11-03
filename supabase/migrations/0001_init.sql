@@ -4,7 +4,7 @@
 create extension if not exists pgcrypto;
 
 create type public.app_role as enum ('administrator', 'campaign_manager', 'executive_viewer');
-create type public.verification_status as enum ('verified', 'pending', 'requires_correction');
+create type public.verification_status as enum ('green', 'yellow', 'red');
 create type public.gender_option as enum ('female', 'male', 'other', 'prefer_not_to_say');
 
 create table public.profiles (
@@ -33,7 +33,7 @@ create table public.administrative_records (
   constituency_id uuid not null references public.constituencies (id) on delete restrict,
   phone_e164 text check (phone_e164 is null or phone_e164 ~ '^\+233[25][0-9]{8}$'),
   gender public.gender_option,
-  verification_status public.verification_status not null default 'pending',
+  verification_status public.verification_status not null default 'yellow',
   admin_note text check (admin_note is null or char_length(admin_note) <= 500),
   created_by uuid not null references public.profiles (id) on delete restrict,
   updated_by uuid not null references public.profiles (id) on delete restrict,
@@ -252,9 +252,9 @@ declare
   v_from timestamptz;
   v_to timestamptz;
   v_total integer;
-  v_verified integer;
-  v_pending integer;
-  v_correction integer;
+  v_green integer;
+  v_yellow integer;
+  v_red integer;
   v_complete integer;
   v_constituencies integer;
 begin
@@ -279,19 +279,19 @@ begin
   )
   select
     count(*),
-    count(*) filter (where verification_status = 'verified'),
-    count(*) filter (where verification_status = 'pending'),
-    count(*) filter (where verification_status = 'requires_correction'),
+    count(*) filter (where verification_status = 'green'),
+    count(*) filter (where verification_status = 'yellow'),
+    count(*) filter (where verification_status = 'red'),
     count(*) filter (where phone_e164 is not null and full_name is not null and constituency_id is not null),
     count(distinct constituency_id)
-  into v_total, v_verified, v_pending, v_correction, v_complete, v_constituencies
+  into v_total, v_green, v_yellow, v_red, v_complete, v_constituencies
   from filtered;
 
   return jsonb_build_object(
     'total_records', v_total,
-    'verified_records', v_verified,
-    'pending_records', v_pending,
-    'correction_records', v_correction,
+    'green_records', v_green,
+    'yellow_records', v_yellow,
+    'red_records', v_red,
     'constituencies_with_data', v_constituencies,
     'completeness_percent', case when v_total = 0 then 0 else round((v_complete::numeric / v_total) * 1000) / 10 end,
     'created_over_time', coalesce((
@@ -307,9 +307,9 @@ begin
       ) x
     ), '[]'::jsonb),
     'verification_distribution', jsonb_build_array(
-      jsonb_build_object('status', 'verified', 'count', v_verified),
-      jsonb_build_object('status', 'pending', 'count', v_pending),
-      jsonb_build_object('status', 'requires_correction', 'count', v_correction)
+      jsonb_build_object('status', 'green', 'count', v_green),
+      jsonb_build_object('status', 'yellow', 'count', v_yellow),
+      jsonb_build_object('status', 'red', 'count', v_red)
     ),
     'completeness_by_constituency', coalesce((
       select jsonb_agg(row_to_json(x))
@@ -447,6 +447,11 @@ create policy "Users can update own name"
   using (id = auth.uid() or public.current_app_role() = 'administrator')
   with check (id = auth.uid() or public.current_app_role() = 'administrator');
 
+create policy "Public dashboard can read constituencies"
+  on public.constituencies for select
+  to anon
+  using (true);
+
 create policy "Authenticated users can read constituencies"
   on public.constituencies for select
   to authenticated
@@ -457,6 +462,11 @@ create policy "Administrators can manage constituencies"
   to authenticated
   using (public.current_app_role() = 'administrator')
   with check (public.current_app_role() = 'administrator');
+
+create policy "Public dashboard can read administrative records"
+  on public.administrative_records for select
+  to anon
+  using (true);
 
 create policy "Staff can read administrative records"
   on public.administrative_records for select
@@ -498,6 +508,10 @@ create policy "Authenticated users can insert own audit events"
   on public.audit_events for insert
   to authenticated
   with check (actor_id = auth.uid());
+
+grant usage on schema public to anon;
+grant select on public.constituencies to anon;
+grant select on public.administrative_records to anon;
 
 grant usage on schema public to authenticated;
 grant select, update on public.profiles to authenticated;

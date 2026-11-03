@@ -1,6 +1,6 @@
 import type { AppRole } from "@/lib/roles";
 
-export type VerificationStatus = "verified" | "pending" | "requires_correction";
+export type VerificationStatus = "green" | "yellow" | "red";
 
 export type Gender = "female" | "male" | "other" | "prefer_not_to_say";
 
