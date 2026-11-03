@@ -67,6 +67,12 @@ function normalizePhoneValue(value: string) {
   return normalizeGhanaPhone(value.trim()) ?? "";
 }
 
+const VALID_STATUS_VALUES = ["verified", "pending", "requires_correction"] as const;
+
+function isValidStatusValue(value: string): value is DemoRecord["verification_status"] {
+  return VALID_STATUS_VALUES.includes(value as DemoRecord["verification_status"]);
+}
+
 function isValidUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -326,79 +332,65 @@ export default function RecordsPage() {
         return next;
       });
 
-      const changedRow = nextRows.find((record) => record.id === id);
-      if (field === "verification_status" && changedRow) {
-        const rowToPersist = {
-          ...changedRow,
-          full_name: changedRow.full_name.trim(),
-          phone: normalizePhoneValue(changedRow.phone),
-          admin_note: changedRow.admin_note.trim(),
-          constituency_id: getSafeUuid(changedRow.constituency_id) ?? constituencyOptions[0]?.id ?? null,
-          constituency_name: getConstituencyNameById(changedRow.constituency_id, constituencyOptions),
-          updated_at: new Date().toISOString(),
-        };
-
-        const persistStatusChange = async () => {
-          if (isSupabaseConfigured()) {
-            try {
-              const supabase = createBrowserSupabaseClient();
-              const { data: userData } = await supabase.auth.getUser();
-              const actorId = getSafeUuid(userData?.user?.id) ?? getSafeUuid(rowToPersist.created_by) ?? null;
-
-              const { error } = await supabase.from("administrative_records").upsert(
-                {
-                  id: isValidUuid(rowToPersist.id) ? rowToPersist.id : getRandomRecordId(),
-                  full_name: rowToPersist.full_name,
-                  constituency_id: getSafeUuid(rowToPersist.constituency_id) ?? constituencyOptions[0]?.id,
-                  phone_e164: normalizePhoneValue(rowToPersist.phone),
-                  gender: rowToPersist.gender || null,
-                  verification_status: rowToPersist.verification_status,
-                  admin_note: rowToPersist.admin_note || null,
-                  created_by: actorId ?? null,
-                  updated_by: actorId ?? null,
-                  created_at: rowToPersist.created_at,
-                  updated_at: rowToPersist.updated_at,
-                },
-                { onConflict: "id" },
-              );
-
-              if (error) {
-                setError(error.message);
-                return;
-              }
-
-              const { data, error: queryError } = await supabase
-                .from("administrative_records")
-                .select("id, full_name, constituency_id, phone_e164, gender, verification_status, admin_note, created_at, updated_at, constituencies(name)")
-                .order("created_at", { ascending: false });
-
-              if (queryError) {
-                setError(queryError.message);
-                return;
-              }
-
-              const refreshedRecords = mapSupabaseRows(data as LiveRecordRow[]);
-              setRecords(refreshedRecords);
-              saveDemoRecords(refreshedRecords);
-              notifyDemoRecordsChanged();
-              router.refresh();
-              return;
-            } catch (errorObject) {
-              const message = errorObject instanceof Error ? errorObject.message : "Unable to update status.";
-              setError(message);
-              return;
-            }
-          }
-
-          saveDemoRecords(nextRows);
-          notifyDemoRecordsChanged();
-        };
-
-        void persistStatusChange();
-      }
-
       return nextRows;
     });
+  };
+
+  const handleInlineStatusChange = async (recordId: string, nextStatus: string) => {
+    if (!isValidStatusValue(nextStatus)) {
+      return;
+    }
+
+    const previousSnapshot = records.find((record) => record.id === recordId);
+    const optimisticRecords = records.map((record) => (record.id === recordId ? { ...record, verification_status: nextStatus, updated_at: new Date().toISOString() } : record));
+
+    setRecords(optimisticRecords);
+    saveDemoRecords(optimisticRecords);
+    notifyDemoRecordsChanged();
+
+    try {
+      const response = await fetch(`/api/records/${encodeURIComponent(recordId)}/status`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ verification_status: nextStatus }),
+      });
+
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; record?: { verification_status?: DemoRecord["verification_status"]; updated_at?: string } };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to update delegate status.");
+      }
+
+      const refreshedRecords = records.map((record) => {
+        if (record.id !== recordId) {
+          return record;
+        }
+
+        return {
+          ...record,
+          verification_status: payload.record?.verification_status ?? nextStatus,
+          updated_at: payload.record?.updated_at ?? new Date().toISOString(),
+        };
+      });
+
+      setRecords(refreshedRecords);
+      saveDemoRecords(refreshedRecords);
+      notifyDemoRecordsChanged();
+      router.refresh();
+      setSuccess("Delegate status updated.");
+      setError("");
+    } catch (errorObject) {
+      if (previousSnapshot) {
+        const revertedRecords = records.map((record) => (record.id === recordId ? previousSnapshot : record));
+        setRecords(revertedRecords);
+        saveDemoRecords(revertedRecords);
+      }
+
+      const message = errorObject instanceof Error ? errorObject.message : "Unable to update delegate status.";
+      setError(message);
+      setSuccess("");
+    }
   };
 
   const handleAddRecord = async () => {
@@ -917,7 +909,9 @@ export default function RecordsPage() {
                       <td className="px-3 py-2">
                         <select
                           value={record.verification_status}
-                          onChange={(event) => updateRow(record.id, "verification_status", event.target.value)}
+                          onChange={(event) => {
+                            void handleInlineStatusChange(record.id, event.target.value);
+                          }}
                           className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/30"
                         >
                           <option value="pending">Pending</option>
