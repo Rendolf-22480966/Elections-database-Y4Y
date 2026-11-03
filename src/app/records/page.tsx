@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
@@ -76,6 +77,10 @@ function getRandomRecordId() {
   }
 
   return `record-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function getSafeUuid(value?: string | null) {
+  return typeof value === "string" && isValidUuid(value) ? value : null;
 }
 
 function resolveConstituencyId(value: string, constituencyList: ConstituencyOption[] = DEMO_CONSTITUENCIES) {
@@ -168,6 +173,7 @@ function mapSupabaseRows(rows: LiveRecordRow[]): DemoRecord[] {
 }
 
 export default function RecordsPage() {
+  const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [records, setRecords] = useState<DemoRecord[]>([]);
   const [constituencyOptions, setConstituencyOptions] = useState<ConstituencyOption[]>([...DEMO_CONSTITUENCIES]);
@@ -327,6 +333,7 @@ export default function RecordsPage() {
           full_name: changedRow.full_name.trim(),
           phone: normalizePhoneValue(changedRow.phone),
           admin_note: changedRow.admin_note.trim(),
+          constituency_id: getSafeUuid(changedRow.constituency_id) ?? constituencyOptions[0]?.id ?? null,
           constituency_name: getConstituencyNameById(changedRow.constituency_id, constituencyOptions),
           updated_at: new Date().toISOString(),
         };
@@ -335,17 +342,20 @@ export default function RecordsPage() {
           if (isSupabaseConfigured()) {
             try {
               const supabase = createBrowserSupabaseClient();
+              const { data: userData } = await supabase.auth.getUser();
+              const actorId = getSafeUuid(userData?.user?.id) ?? getSafeUuid(rowToPersist.created_by) ?? null;
+
               const { error } = await supabase.from("administrative_records").upsert(
                 {
                   id: isValidUuid(rowToPersist.id) ? rowToPersist.id : getRandomRecordId(),
                   full_name: rowToPersist.full_name,
-                  constituency_id: rowToPersist.constituency_id,
+                  constituency_id: getSafeUuid(rowToPersist.constituency_id) ?? constituencyOptions[0]?.id,
                   phone_e164: normalizePhoneValue(rowToPersist.phone),
                   gender: rowToPersist.gender || null,
                   verification_status: rowToPersist.verification_status,
                   admin_note: rowToPersist.admin_note || null,
-                  created_by: rowToPersist.created_by || "admin-1",
-                  updated_by: rowToPersist.created_by || "admin-1",
+                  created_by: actorId ?? null,
+                  updated_by: actorId ?? null,
                   created_at: rowToPersist.created_at,
                   updated_at: rowToPersist.updated_at,
                 },
@@ -371,6 +381,7 @@ export default function RecordsPage() {
               setRecords(refreshedRecords);
               saveDemoRecords(refreshedRecords);
               notifyDemoRecordsChanged();
+              router.refresh();
               return;
             } catch (errorObject) {
               const message = errorObject instanceof Error ? errorObject.message : "Unable to update status.";
@@ -449,7 +460,7 @@ export default function RecordsPage() {
         const payload = [{
           id: isValidUuid(candidate.id) ? candidate.id : getRandomRecordId(),
           full_name: candidate.full_name,
-          constituency_id: candidate.constituency_id,
+          constituency_id: getSafeUuid(candidate.constituency_id) ?? constituencyOptions[0]?.id ?? null,
           phone_e164: normalizePhoneValue(candidate.phone),
           gender: candidate.gender || null,
           verification_status: candidate.verification_status,
@@ -480,6 +491,7 @@ export default function RecordsPage() {
         setRecords(refreshedRecords);
         saveDemoRecords(refreshedRecords);
         notifyDemoRecordsChanged();
+        router.refresh();
         setForm({ ...EMPTY_FORM, constituency_id: constituencyOptions[0]?.id ?? EMPTY_FORM.constituency_id });
         setError("");
         setSuccess("New delegate added to the live database.");
@@ -535,12 +547,12 @@ export default function RecordsPage() {
         const payload = normalizedRows.map((row) => ({
           id: isValidUuid(row.id) ? row.id : getRandomRecordId(),
           full_name: row.full_name,
-          constituency_id: row.constituency_id,
+          constituency_id: getSafeUuid(row.constituency_id) ?? constituencyOptions[0]?.id ?? null,
           phone_e164: normalizePhoneValue(row.phone),
           gender: row.gender || null,
           verification_status: row.verification_status,
           admin_note: row.admin_note || null,
-          created_by: row.created_by === "supabase" || row.created_by === "admin-1" ? user.id : row.created_by || user.id,
+          created_by: getSafeUuid(row.created_by) ?? user.id,
           updated_by: user.id,
           created_at: row.created_at,
           updated_at: new Date().toISOString(),
@@ -567,6 +579,7 @@ export default function RecordsPage() {
         setRecords(refreshedRecords);
         saveDemoRecords(refreshedRecords);
         notifyDemoRecordsChanged();
+        router.refresh();
         setSuccess("Changes saved to the database successfully.");
         return;
       }
@@ -574,6 +587,7 @@ export default function RecordsPage() {
       setRecords(normalizedRows);
       saveDemoRecords(normalizedRows);
       notifyDemoRecordsChanged();
+      router.refresh();
       setSuccess("Changes saved successfully.");
     } finally {
       setIsSaving(false);

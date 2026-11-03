@@ -234,7 +234,7 @@ export async function GET(request: Request) {
         );
 
         const fallbackConstituency = {
-          id: `constituency_${String(index + 1).padStart(3, "0")}`,
+          id: DEMO_CONSTITUENCIES[0]?.id ?? "",
           name: constituencyName || "Unassigned",
           code: constituencyName ? constituencyName.slice(0, 3).toUpperCase() : "UNK",
         };
@@ -251,13 +251,13 @@ export async function GET(request: Request) {
         const record: DemoRecord = {
           id: `import-${Date.now()}-${index}`,
           full_name: fullName,
-          constituency_id: selectedConstituency.id,
+          constituency_id: selectedConstituency.id || DEMO_CONSTITUENCIES[0]?.id || "",
           constituency_name: canonicalConstituencyName || selectedConstituency.name,
           phone: normalizedPhone,
           gender,
           verification_status: normalizeStatus(rawStatus || "pending"),
           admin_note: rawNote || `${constituencyName} officer`,
-          created_by: "spreadsheet-import",
+          created_by: "system-import",
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
