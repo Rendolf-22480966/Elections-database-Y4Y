@@ -2,7 +2,8 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabasePublicEnv, isSupabaseAuthEnabled } from "@/lib/env";
 
-const PUBLIC_PATHS = ["/login", "/signup", "/auth/callback", "/api/records/import", "/dashboard", "/"];
+// Pages that need a signed-in account. Anyone not signed in is sent to /login first.
+const PROTECTED_PATHS = ["/dashboard", "/records", "/admin"];
 
 export async function updateSession(request: NextRequest) {
   const env = getSupabasePublicEnv();
@@ -27,33 +28,19 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  const hasSessionCookie = request.cookies.getAll().some((cookie) => {
-    const name = cookie.name.toLowerCase();
-    return name.includes("auth-token") || name.includes("refresh-token") || name.includes("supabase") || name.startsWith("sb-");
-  });
-
-  const user = hasSessionCookie ? (await supabase.auth.getUser()).data.user : null;
+  // Refreshes the sign-in session cookie when needed.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
-  const isPublic = PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+  const isProtected = PROTECTED_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
-  const isProtectedRoute = pathname === "/records";
-
-  if (!user && isProtectedRoute) {
+  if (!user && isProtected) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
-    url.searchParams.set("next", pathname);
-    return NextResponse.redirect(url);
-  }
-
-  if (!user && !isPublic && pathname !== "/records") {
-    return response;
-  }
-
-  if (user && (pathname === "/login" || pathname === "/signup")) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/records";
     url.search = "";
+    url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
   }
 

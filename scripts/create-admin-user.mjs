@@ -1,8 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 
-const ADMIN_EMAIL = "abdulaiiddrisu78@gmail.com";
-const ADMIN_PASSWORD = "Tracker78$Admin";
-const ADMIN_NAME = "Abdulai Idrisu";
+// Never type real passwords into this file. Pass them when you run it, e.g. (PowerShell):
+//   $env:ADMIN_EMAIL="you@example.com"; $env:ADMIN_PASSWORD="a-strong-password"; $env:ADMIN_NAME="Your Name"; npm run supabase:create-admin
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const ADMIN_NAME = process.env.ADMIN_NAME || "Administrator";
+
+if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+  console.error("Set ADMIN_EMAIL and ADMIN_PASSWORD before running this script.");
+  process.exit(1);
+}
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -85,7 +92,6 @@ try {
   await upsertAdminProfile(createdUser.user.id, ADMIN_EMAIL, ADMIN_NAME);
 
   console.log(`Created admin user: ${ADMIN_EMAIL}`);
-  console.log(`Password: ${ADMIN_PASSWORD}`);
   console.log("Use these credentials on the login page.");
 } catch (error) {
   console.error("Failed to create Supabase admin user.", error);

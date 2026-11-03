@@ -40,3 +40,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local backups and helper files (never upload: old files contain passwords)
+/_backup_before_live/
+build-log.txt
+*.bat
+/.venv/

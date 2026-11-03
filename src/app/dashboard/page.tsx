@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
-import { DEMO_CONSTITUENCIES, getDashboardSummary, getDemoRecords, type DemoRecord } from "@/lib/demo-data";
+import { getDashboardSummary, getDemoRecords, type DemoRecord } from "@/lib/demo-data";
 import { isSupabaseConfigured } from "@/lib/env";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
@@ -13,123 +13,135 @@ type DashboardRow = {
   phone_e164: string | null;
   gender: string | null;
   verification_status: "green" | "yellow" | "red";
+  admin_note: string | null;
   created_at: string;
-  constituencies: { name: string }[] | null;
+  updated_at: string;
+  // Supabase returns an object for this kind of link; older code expected a list.
+  constituencies: { name: string } | { name: string }[] | null;
 };
 
-type ConstituencyOption = {
-  id: string;
-  name: string;
-  code?: string;
-};
+type LiveState = "connecting" | "live" | "offline" | "demo";
+
+const PAGE_SIZE = 1000; // Supabase returns at most 1000 rows per request
+
+function getConstituencyName(value: DashboardRow["constituencies"]): string {
+  if (!value) return "Unassigned";
+  if (Array.isArray(value)) return value[0]?.name ?? "Unassigned";
+  return value.name ?? "Unassigned";
+}
 
 export default function DashboardPage() {
   const [records, setRecords] = useState<DemoRecord[]>([]);
-  const [constituencyOptions, setConstituencyOptions] = useState<ConstituencyOption[]>(DEMO_CONSTITUENCIES);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [liveState, setLiveState] = useState<LiveState>(isSupabaseConfigured() ? "connecting" : "demo");
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadData = useCallback(async () => {
-    if (isSupabaseConfigured()) {
-      const supabase = createBrowserSupabaseClient();
-      const [{ data, error }, { data: constituencyData, error: constituencyError }] = await Promise.all([
-        supabase
-          .from("administrative_records")
-          .select("id, full_name, phone_e164, gender, verification_status, created_at, constituencies(name)")
-          .order("created_at", { ascending: false })
-          .limit(50),
-        supabase.from("constituencies").select("id, name, code").order("name"),
-      ]);
-
-      if (!constituencyError && constituencyData) {
-        setConstituencyOptions(constituencyData.map((row) => ({ id: row.id, name: row.name, code: row.code })));
-      }
-
-      if (!error && data && data.length > 0) {
-        const mapped = data.map((row: DashboardRow) => ({
-          id: row.id,
-          full_name: row.full_name,
-          constituency_id: "supabase",
-          constituency_name: row.constituencies?.[0]?.name ?? "Unassigned",
-          phone: row.phone_e164 ?? "",
-          gender: (row.gender as DemoRecord["gender"]) ?? "",
-          verification_status: row.verification_status,
-          admin_note: "",
-          created_by: "supabase",
-          created_at: row.created_at,
-          updated_at: row.created_at,
-        }));
-
-        setRecords(mapped);
-        return;
-      }
+    if (!isSupabaseConfigured()) {
+      setRecords(getDemoRecords());
+      setLastUpdated(new Date());
+      return;
     }
 
-    setRecords(getDemoRecords());
+    const supabase = createBrowserSupabaseClient();
+    const allRows: DashboardRow[] = [];
+
+    // Load every record, page by page (the old code stopped at 50).
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const { data, error } = await supabase
+        .from("administrative_records")
+        .select(
+          "id, full_name, phone_e164, gender, verification_status, admin_note, created_at, updated_at, constituencies(name)",
+        )
+        .order("created_at", { ascending: false })
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) {
+        // Show the problem instead of quietly switching to fake demo data.
+        setLoadError("Could not load the latest data. Check your connection and that you are signed in.");
+        return;
+      }
+
+      const rows = (data ?? []) as unknown as DashboardRow[];
+      allRows.push(...rows);
+      if (rows.length < PAGE_SIZE) break;
+    }
+
+    setRecords(
+      allRows.map((row) => ({
+        id: row.id,
+        full_name: row.full_name,
+        constituency_id: "supabase",
+        constituency_name: getConstituencyName(row.constituencies),
+        phone: row.phone_e164 ?? "",
+        gender: (row.gender as DemoRecord["gender"]) ?? "",
+        verification_status: row.verification_status,
+        admin_note: row.admin_note ?? "",
+        created_by: "supabase",
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      })),
+    );
+    setLoadError(null);
+    setLastUpdated(new Date());
   }, []);
 
   useEffect(() => {
     let isMounted = true;
 
-    const refreshRecords = () => {
-      if (!isMounted) {
-        return;
-      }
-      void loadData();
-    };
-
-    const subscribeToRealtime = () => {
-      if (!isSupabaseConfigured()) {
-        return () => {};
-      }
-
-      const supabase = createBrowserSupabaseClient();
-      const channel = supabase
-        .channel("dashboard-records-changes")
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "administrative_records",
-          },
-          () => {
-            if (isMounted) {
-              void loadData();
-            }
-          },
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "constituencies",
-          },
-          () => {
-            if (isMounted) {
-              void loadData();
-            }
-          },
-        )
-        .subscribe();
-
-      return () => {
-        void supabase.removeChannel(channel);
-      };
+    // When many changes arrive at once (e.g. a bulk upload), reload once instead of 100 times.
+    const scheduleReload = () => {
+      if (!isMounted) return;
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+      reloadTimer.current = setTimeout(() => {
+        if (isMounted) void loadData();
+      }, 300);
     };
 
     void loadData();
-    window.addEventListener("storage", refreshRecords);
-    window.addEventListener("election-delegate-records-changed", refreshRecords);
+    window.addEventListener("storage", scheduleReload);
+    window.addEventListener("election-delegate-records-changed", scheduleReload);
 
-    const cleanupRealtime = subscribeToRealtime();
+    let cleanupRealtime = () => {};
+
+    if (isSupabaseConfigured()) {
+      const supabase = createBrowserSupabaseClient();
+      const channel = supabase
+        .channel("dashboard-records-changes")
+        .on("postgres_changes", { event: "*", schema: "public", table: "administrative_records" }, scheduleReload)
+        .on("postgres_changes", { event: "*", schema: "public", table: "constituencies" }, scheduleReload)
+        .subscribe((status) => {
+          if (!isMounted) return;
+          if (status === "SUBSCRIBED") {
+            setLiveState("live");
+            // Catch anything that changed while we were connecting or offline.
+            scheduleReload();
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+            setLiveState("offline");
+          }
+        });
+
+      cleanupRealtime = () => {
+        void supabase.removeChannel(channel);
+      };
+    }
+
+    // If the laptop/phone was asleep, refresh when the person comes back to the tab.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") scheduleReload();
+    };
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       isMounted = false;
-      window.removeEventListener("storage", refreshRecords);
-      window.removeEventListener("election-delegate-records-changed", refreshRecords);
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+      window.removeEventListener("storage", scheduleReload);
+      window.removeEventListener("election-delegate-records-changed", scheduleReload);
+      document.removeEventListener("visibilitychange", onVisible);
       cleanupRealtime();
     };
-  }, []);
+  }, [loadData]);
 
   const summary = useMemo(() => getDashboardSummary(records), [records]);
   const groupedRecords = useMemo(() => {
@@ -158,23 +170,27 @@ export default function DashboardPage() {
       .sort((a, b) => a.constituency.localeCompare(b.constituency));
   }, [records]);
 
-  const chartData = Array.from(
-    records.reduce((accumulator, record) => {
-      const key = (record.constituency_name || "Unassigned").trim();
-      if (!key) {
-        return accumulator;
-      }
+  const chartData = useMemo(
+    () =>
+      Array.from(
+        records.reduce((accumulator, record) => {
+          const key = (record.constituency_name || "Unassigned").trim();
+          if (!key) {
+            return accumulator;
+          }
 
-      accumulator.set(key, (accumulator.get(key) ?? 0) + 1);
-      return accumulator;
-    }, new Map<string, number>()).entries(),
-  )
-    .map(([name, count]) => ({
-      name,
-      shortName: getConstituencyShortName(name),
-      count,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+          accumulator.set(key, (accumulator.get(key) ?? 0) + 1);
+          return accumulator;
+        }, new Map<string, number>()).entries(),
+      )
+        .map(([name, count]) => ({
+          name,
+          shortName: getConstituencyShortName(name),
+          count,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [records],
+  );
 
   return (
     <div className="space-y-6">
@@ -183,10 +199,17 @@ export default function DashboardPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-blue-700">Overview</p>
           <h2 className="mt-2 text-3xl font-bold text-slate-900">Delegate performance</h2>
         </div>
-        <Button variant="secondary" onClick={() => void loadData()}>
-          Refresh data
-        </Button>
+        <div className="flex items-center gap-3">
+          <LiveBadge state={liveState} lastUpdated={lastUpdated} />
+          <Button variant="secondary" onClick={() => void loadData()}>
+            Refresh data
+          </Button>
+        </div>
       </div>
+
+      {loadError ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</div>
+      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Total delegates" value={summary.total.toString()} accent="blue" />
@@ -249,7 +272,10 @@ export default function DashboardPage() {
                     <span className="font-semibold text-slate-800">{item.count}</span>
                   </div>
                   <div className="h-2.5 rounded-full bg-slate-100">
-                    <div className={`h-2.5 rounded-full ${colorMap[item.status]}`} style={{ width: `${share}%` }} />
+                    <div
+                      className={`h-2.5 rounded-full transition-all duration-500 ${colorMap[item.status]}`}
+                      style={{ width: `${share}%` }}
+                    />
                   </div>
                 </div>
               );
@@ -279,9 +305,9 @@ export default function DashboardPage() {
                   const statusTone = getStatusTone(record.verification_status);
 
                   return (
-                    <div key={record.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                    <div key={record.id} className="rounded-xl border border-slate-200 bg-white p-4 transition-colors duration-500">
                       <div className="mb-3 flex items-center justify-between gap-2">
-                        <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${statusTone.badge}`}>
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors duration-500 ${statusTone.badge}`}>
                           {record.verification_status.toUpperCase()}
                         </span>
                       </div>
@@ -302,7 +328,7 @@ export default function DashboardPage() {
 
                         <div>
                           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Status</p>
-                          <p className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-medium ${statusTone.text}`}>
+                          <p className={`mt-1 inline-flex rounded-full px-2 py-1 text-xs font-medium transition-colors duration-500 ${statusTone.text}`}>
                             {record.verification_status.toUpperCase()}
                           </p>
                         </div>
@@ -315,6 +341,27 @@ export default function DashboardPage() {
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+function LiveBadge({ state, lastUpdated }: { state: LiveState; lastUpdated: Date | null }) {
+  const config = {
+    live: { dot: "bg-emerald-500 animate-pulse", label: "Live", tone: "text-emerald-700 bg-emerald-50 ring-emerald-200" },
+    connecting: { dot: "bg-amber-400", label: "Connecting…", tone: "text-amber-700 bg-amber-50 ring-amber-200" },
+    offline: { dot: "bg-red-500", label: "Offline – tap Refresh", tone: "text-red-700 bg-red-50 ring-red-200" },
+    demo: { dot: "bg-slate-400", label: "Demo data", tone: "text-slate-600 bg-slate-50 ring-slate-200" },
+  }[state];
+
+  return (
+    <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ${config.tone}`}>
+      <span className={`h-2 w-2 rounded-full ${config.dot}`} />
+      <span>{config.label}</span>
+      {lastUpdated ? (
+        <span className="font-normal opacity-70">
+          · updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+        </span>
+      ) : null}
     </div>
   );
 }

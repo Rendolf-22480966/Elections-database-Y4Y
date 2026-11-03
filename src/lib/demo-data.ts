@@ -2,7 +2,6 @@ import type { AppRole } from "@/lib/roles";
 import { isSupabaseConfigured } from "@/lib/env";
 import { normalizeGhanaPhone } from "@/lib/phone";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { WORKBOOK_RECORDS } from "../../_workbook_records_gen";
 
 export type DemoSession = {
   id: string;
@@ -123,32 +122,19 @@ export const EASTERN_REGION_CONSTITUENCIES: Array<{ id: string; name: string; co
 
 export const DEMO_CONSTITUENCIES = EASTERN_REGION_CONSTITUENCIES;
 
-const DEFAULT_DEMO_USERS: DemoUser[] = [
-  {
-    id: "admin-1",
-    name: "Rendolf Agyemang",
-    email: "rendolfagyemang2@gmail.com",
-    password: "Rendolf488$",
-    role: "administrator",
-  },
-  {
-    id: "admin-2",
-    name: "Abdulai Idrisu",
-    email: "abdulaiiddrisu78@gmail.com",
-    password: "12345678",
-    role: "administrator",
-  },
-];
+// Fake logins removed: all sign-ins now use real Supabase accounts.
+// (The passwords that used to be here were visible to every visitor.)
+const DEFAULT_DEMO_USERS: DemoUser[] = [];
 
-export const ADMIN_ONLY_EMAIL = "abdulaiiddrisu78@gmail.com";
-export const ADMIN_ONLY_PASSWORD = "12345678";
+export const ADMIN_ONLY_EMAIL = "";
+export const ADMIN_ONLY_PASSWORD = "";
 
-export function isAdminOnlyLogin(email: string, password: string) {
-  return email.trim().toLowerCase() === ADMIN_ONLY_EMAIL && password === ADMIN_ONLY_PASSWORD;
+export function isAdminOnlyLogin(_email: string, _password: string) {
+  return false;
 }
 
-export function isAdminOnlyEmail(email: string | null | undefined) {
-  return email?.trim().toLowerCase() === ADMIN_ONLY_EMAIL;
+export function isAdminOnlyEmail(_email: string | null | undefined) {
+  return false;
 }
 
 export const DEMO_USERS = DEFAULT_DEMO_USERS;
@@ -156,12 +142,9 @@ export const DEMO_USERS = DEFAULT_DEMO_USERS;
 const constituencyId = (name: string) =>
   EASTERN_REGION_CONSTITUENCIES.find((constituency) => constituency.name.toLowerCase() === name.toLowerCase())?.id ?? createConstituencyUuid(name);
 
-export const DEMO_RECORDS: DemoRecord[] = WORKBOOK_RECORDS.map((record) => ({
-  ...record,
-  verification_status: normalizeDemoStatus(record.verification_status),
-  created_at: record.created_at || new Date().toISOString(),
-  updated_at: record.updated_at || record.created_at || new Date().toISOString(),
-}));
+// The delegate list now lives only in Supabase (loaded with 0003_load_delegates.sql).
+// It is no longer built into the website, so phone numbers are not sent to every visitor.
+export const DEMO_RECORDS: DemoRecord[] = [];
 
 export const DEMO_SESSION_KEY = "election-delegate-session";
 export const DEMO_RECORDS_KEY = "election-delegate-records";
@@ -311,13 +294,11 @@ export async function syncDemoRecordsToSupabase(records: DemoRecord[]) {
 
 export function saveDemoRecords(records: DemoRecord[]) {
   if (typeof window === "undefined") return;
-  const nextRecords = Array.isArray(records) && records.length > 0 ? records : DEMO_RECORDS;
+  const nextRecords = Array.isArray(records) ? records : DEMO_RECORDS;
   window.localStorage.setItem(DEMO_RECORDS_KEY, JSON.stringify(nextRecords));
   notifyDemoRecordsChanged();
 
-  if (isSupabaseConfigured()) {
-    void syncDemoRecordsToSupabase(nextRecords);
-  }
+  // No longer copies browser data into Supabase: the panel saves to Supabase directly.
 }
 
 export function getDashboardSummary(records: DemoRecord[]): DashboardSummary {
