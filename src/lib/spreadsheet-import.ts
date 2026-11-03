@@ -20,6 +20,10 @@ function normalizeName(value: string) {
     .replace(/\b([A-Za-z])([A-Za-z'-]*)\b/g, (match, first, rest) => first.toUpperCase() + rest.toLowerCase());
 }
 
+function isValidUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 export async function loadImportedRecords(): Promise<DemoRecord[]> {
   try {
     const response = await fetch("/api/records/import", { cache: "no-store" });
@@ -77,10 +81,12 @@ export async function syncImportedRecordsToSupabase(records: DemoRecord[]) {
         ? record.id
         : `import-${Date.now()}-${index}`;
 
+      const safeConstituencyId = constituencyId || match?.id || (isValidUuid(record.constituency_id) ? record.constituency_id : null);
+
       return {
         id: recordId,
         full_name: normalizeName(record.full_name),
-        constituency_id: constituencyId || match?.id || record.constituency_id,
+        constituency_id: safeConstituencyId,
         phone_e164: record.phone,
         gender: record.gender || null,
         verification_status: record.verification_status,
@@ -91,7 +97,7 @@ export async function syncImportedRecordsToSupabase(records: DemoRecord[]) {
         updated_at: new Date().toISOString(),
       };
     })
-    .filter((row) => row.constituency_id);
+    .filter((row) => Boolean(row.constituency_id) && isValidUuid(String(row.constituency_id)));
 
   if (!payload.length) {
     return false;

@@ -78,6 +78,19 @@ function getRandomRecordId() {
   return `record-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function resolveConstituencyId(value: string, constituencyList: ConstituencyOption[] = DEMO_CONSTITUENCIES) {
+  if (isValidUuid(value)) {
+    return value;
+  }
+
+  const directMatch = constituencyList.find((constituency) => constituency.id === value || constituency.name.toLowerCase() === value.toLowerCase());
+  if (directMatch) {
+    return directMatch.id;
+  }
+
+  return constituencyList[0]?.id ?? value;
+}
+
 function getConstituencyNameById(id: string, constituencyList: ConstituencyOption[] = DEMO_CONSTITUENCIES) {
   return constituencyList.find((constituency) => constituency.id === id)?.name ?? "Unassigned";
 }
@@ -237,6 +250,14 @@ export default function RecordsPage() {
   useEffect(() => {
     if (!form.constituency_id && constituencyOptions[0]) {
       setForm((current) => ({ ...current, constituency_id: constituencyOptions[0].id }));
+      return;
+    }
+
+    if (constituencyOptions.length > 0 && form.constituency_id && !isValidUuid(form.constituency_id)) {
+      const resolved = resolveConstituencyId(form.constituency_id, constituencyOptions);
+      if (resolved && resolved !== form.constituency_id) {
+        setForm((current) => ({ ...current, constituency_id: resolved }));
+      }
     }
   }, [constituencyOptions, form.constituency_id]);
 
@@ -366,8 +387,10 @@ export default function RecordsPage() {
       return;
     }
 
-    if (!form.constituency_id) {
-      setError("Select a constituency.");
+    const resolvedConstituencyId = resolveConstituencyId(form.constituency_id, constituencyOptions);
+
+    if (!resolvedConstituencyId || !isValidUuid(resolvedConstituencyId)) {
+      setError("Select a valid constituency.");
       return;
     }
 
@@ -379,8 +402,8 @@ export default function RecordsPage() {
     const candidate: DemoRecord = {
       id: getRandomRecordId(),
       full_name: trimmedName,
-      constituency_id: form.constituency_id,
-      constituency_name: getConstituencyNameById(form.constituency_id, constituencyOptions),
+      constituency_id: resolvedConstituencyId,
+      constituency_name: getConstituencyNameById(resolvedConstituencyId, constituencyOptions),
       phone: normalizedPhone,
       gender: form.gender as DemoRecord["gender"],
       verification_status: form.verification_status,
@@ -473,7 +496,8 @@ export default function RecordsPage() {
         full_name: record.full_name.trim(),
         phone: normalizePhoneValue(record.phone),
         admin_note: record.admin_note.trim(),
-        constituency_name: getConstituencyNameById(record.constituency_id, constituencyOptions),
+        constituency_id: resolveConstituencyId(record.constituency_id, constituencyOptions),
+        constituency_name: getConstituencyNameById(resolveConstituencyId(record.constituency_id, constituencyOptions), constituencyOptions),
         updated_at: new Date().toISOString(),
       }));
 
@@ -845,7 +869,7 @@ export default function RecordsPage() {
                           }}
                           className="flex h-10 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600/30"
                         >
-                          {DEMO_CONSTITUENCIES.map((constituency) => (
+                          {constituencyOptions.map((constituency) => (
                             <option key={constituency.id} value={constituency.id}>
                               {constituency.name}
                             </option>
