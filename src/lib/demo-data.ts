@@ -1,4 +1,7 @@
 import type { AppRole } from "@/lib/roles";
+import { isSupabaseConfigured } from "@/lib/env";
+import { normalizeGhanaPhone } from "@/lib/phone";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { WORKBOOK_RECORDS } from "../../_workbook_records_gen";
 
 export type DemoSession = {
@@ -248,11 +251,73 @@ export function notifyDemoRecordsChanged() {
   window.dispatchEvent(new CustomEvent("election-delegate-records-changed"));
 }
 
+function isValidUuid(value: string | null | undefined) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+export async function syncDemoRecordsToSupabase(records: DemoRecord[]) {
+  if (!isSupabaseConfigured() || !Array.isArray(records) || records.length === 0) {
+    return false;
+  }
+
+  try {
+    const supabase = createBrowserSupabaseClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user?.id) {
+      return false;
+    }
+
+    const payload = records
+      .filter((record) => record.full_name?.trim() && record.phone)
+      .map((record) => {
+        const phone = normalizeGhanaPhone(record.phone) ?? record.phone.trim();
+        const constituencyId =
+          isValidUuid(record.constituency_id)
+            ? record.constituency_id
+            : DEMO_CONSTITUENCIES.find((constituency) => constituency.name.toLowerCase() === (record.constituency_name || "").trim().toLowerCase())?.id ??
+              DEMO_CONSTITUENCIES[0]?.id ?? null;
+
+        const id = isValidUuid(record.id) ? record.id : crypto?.randomUUID?.() ?? `record-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+        return {
+          id,
+          full_name: record.full_name.trim(),
+          constituency_id: constituencyId,
+          phone_e164: phone,
+          gender: record.gender || null,
+          verification_status: normalizeDemoStatus(record.verification_status),
+          admin_note: record.admin_note || null,
+          created_by: user.id,
+          updated_by: user.id,
+          created_at: record.created_at || new Date().toISOString(),
+          updated_at: record.updated_at || record.created_at || new Date().toISOString(),
+        };
+      })
+      .filter((row) => Boolean(row.constituency_id) && Boolean(row.phone_e164));
+
+    if (!payload.length) {
+      return false;
+    }
+
+    const { error } = await supabase.from("administrative_records").upsert(payload, { onConflict: "phone_e164" });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 export function saveDemoRecords(records: DemoRecord[]) {
   if (typeof window === "undefined") return;
   const nextRecords = Array.isArray(records) && records.length > 0 ? records : DEMO_RECORDS;
   window.localStorage.setItem(DEMO_RECORDS_KEY, JSON.stringify(nextRecords));
   notifyDemoRecordsChanged();
+
+  if (isSupabaseConfigured()) {
+    void syncDemoRecordsToSupabase(nextRecords);
+  }
 }
 
 export function getDashboardSummary(records: DemoRecord[]): DashboardSummary {
