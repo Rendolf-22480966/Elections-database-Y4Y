@@ -83,9 +83,21 @@ function resolveConstituencyId(value: string, constituencyList: ConstituencyOpti
     return value;
   }
 
-  const directMatch = constituencyList.find((constituency) => constituency.id === value || constituency.name.toLowerCase() === value.toLowerCase());
+  const normalizedValue = value.trim().toLowerCase().replace(/[_\-\s]+/g, " ");
+  const directMatch = constituencyList.find((constituency) => {
+    const candidateName = constituency.name.trim().toLowerCase().replace(/[_\-\s]+/g, " ");
+    return constituency.id === value || candidateName === normalizedValue || constituency.name.toLowerCase() === value.toLowerCase();
+  });
   if (directMatch) {
     return directMatch.id;
+  }
+
+  const numericMatch = value.match(/(?:^|[_\-\s])?(\d+)(?:$|[_\-\s])/i);
+  if (numericMatch) {
+    const index = Number.parseInt(numericMatch[1], 10) - 1;
+    if (constituencyList[index]) {
+      return constituencyList[index].id;
+    }
   }
 
   return constituencyList[0]?.id ?? value;

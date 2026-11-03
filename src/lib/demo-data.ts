@@ -33,45 +33,66 @@ export type DashboardSummary = {
   verified: number;
   pending: number;
   correction: number;
-  byConstituency: Array<{ name: string; count: number }>; 
+  byConstituency: Array<{ name: string; count: number }>;
   byStatus: Array<{ status: DemoStatus; count: number }>;
   recentRecords: DemoRecord[];
 };
 
+function createConstituencyUuid(name: string) {
+  const cleaned = name.trim().toLowerCase();
+  let hash = 2166136261;
+
+  for (let index = 0; index < cleaned.length; index += 1) {
+    hash ^= cleaned.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  const bytes = new Uint8Array(16);
+  for (let index = 0; index < 16; index += 1) {
+    bytes[index] = ((hash >>> ((index % 4) * 8)) & 0xff) ^ ((cleaned.charCodeAt(index % cleaned.length) + index * 13) & 0xff);
+  }
+
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export const EASTERN_REGION_CONSTITUENCIES: Array<{ id: string; name: string; code: string }> = [
-  { id: "constituency_01", name: "Abirem", code: "ABR-01" },
-  { id: "constituency_02", name: "Abuakwa North", code: "ABN-02" },
-  { id: "constituency_03", name: "Abuakwa South", code: "ABS-03" },
-  { id: "constituency_04", name: "Achiase", code: "ACH-04" },
-  { id: "constituency_05", name: "Akwatia", code: "AKW-05" },
-  { id: "constituency_06", name: "Asene-Manso-Akroso", code: "AMA-06" },
-  { id: "constituency_07", name: "Atewa East", code: "ATE-07" },
-  { id: "constituency_08", name: "Atewa West", code: "ATW-08" },
-  { id: "constituency_09", name: "Ayensuano", code: "AYE-09" },
-  { id: "constituency_10", name: "Birim Central", code: "BIC-10" },
-  { id: "constituency_11", name: "Birim North", code: "BIN-11" },
-  { id: "constituency_12", name: "Birim South", code: "BIS-12" },
-  { id: "constituency_13", name: "Denkyembour", code: "DEN-13" },
-  { id: "constituency_14", name: "East Akim", code: "EAK-14" },
-  { id: "constituency_15", name: "Fanteakwa North", code: "FAN-15" },
-  { id: "constituency_16", name: "Fanteakwa South", code: "FAS-16" },
-  { id: "constituency_17", name: "Kade", code: "KAD-17" },
-  { id: "constituency_18", name: "Koforidua Central", code: "KFC-18" },
-  { id: "constituency_19", name: "Koforidua Eastern", code: "KFE-19" },
-  { id: "constituency_20", name: "Kwaebibirem", code: "KWA-20" },
-  { id: "constituency_21", name: "Lower Manya Krobo", code: "LMK-21" },
-  { id: "constituency_22", name: "Manya Krobo", code: "MKR-22" },
-  { id: "constituency_23", name: "Mpraeso", code: "MPR-23" },
-  { id: "constituency_24", name: "New Juaben North", code: "NJN-24" },
-  { id: "constituency_25", name: "New Juaben South", code: "NJS-25" },
-  { id: "constituency_26", name: "Nkawkaw", code: "NKW-26" },
-  { id: "constituency_27", name: "Nsawam-Adoagyiri", code: "NSA-27" },
-  { id: "constituency_28", name: "Okere", code: "OKE-28" },
-  { id: "constituency_29", name: "Suhum", code: "SUH-29" },
-  { id: "constituency_30", name: "Upper Manya Krobo", code: "UMK-30" },
-  { id: "constituency_31", name: "Upper West Akim", code: "UWA-31" },
-  { id: "constituency_32", name: "West Akim", code: "WAK-32" },
-  { id: "constituency_33", name: "Yilo Krobo", code: "YIL-33" },
+  { id: createConstituencyUuid("Abirem"), name: "Abirem", code: "E2201" },
+  { id: createConstituencyUuid("Abuakwa North"), name: "Abuakwa North", code: "E2401" },
+  { id: createConstituencyUuid("Abuakwa South"), name: "Abuakwa South", code: "E2301" },
+  { id: createConstituencyUuid("Achiase"), name: "Achiase", code: "E1801" },
+  { id: createConstituencyUuid("Akwatia"), name: "Akwatia", code: "E2101" },
+  { id: createConstituencyUuid("Asene-Manso-Akroso"), name: "Asene-Manso-Akroso", code: "E1601" },
+  { id: createConstituencyUuid("Atewa East"), name: "Atewa East", code: "E2601" },
+  { id: createConstituencyUuid("Atewa West"), name: "Atewa West", code: "E2501" },
+  { id: createConstituencyUuid("Ayensuano"), name: "Ayensuano", code: "E1201" },
+  { id: createConstituencyUuid("Birim Central"), name: "Birim Central", code: "E3301" },
+  { id: createConstituencyUuid("Birim North"), name: "Birim North", code: "E3201" },
+  { id: createConstituencyUuid("Birim South"), name: "Birim South", code: "E3001" },
+  { id: createConstituencyUuid("Denkyembour"), name: "Denkyembour", code: "E3101" },
+  { id: createConstituencyUuid("East Akim"), name: "East Akim", code: "E1401" },
+  { id: createConstituencyUuid("Fanteakwa North"), name: "Fanteakwa North", code: "E2701" },
+  { id: createConstituencyUuid("Fanteakwa South"), name: "Fanteakwa South", code: "E2801" },
+  { id: createConstituencyUuid("Kade"), name: "Kade", code: "E2001" },
+  { id: createConstituencyUuid("Koforidua Central"), name: "Koforidua Central", code: "E0601" },
+  { id: createConstituencyUuid("Koforidua Eastern"), name: "Koforidua Eastern", code: "E0501" },
+  { id: createConstituencyUuid("Kwaebibirem"), name: "Kwaebibirem", code: "E1901" },
+  { id: createConstituencyUuid("Lower Manya Krobo"), name: "Lower Manya Krobo", code: "E0201" },
+  { id: createConstituencyUuid("Manya Krobo"), name: "Manya Krobo", code: "E0401" },
+  { id: createConstituencyUuid("Mpraeso"), name: "Mpraeso", code: "E3001" },
+  { id: createConstituencyUuid("New Juaben North"), name: "New Juaben North", code: "E0601" },
+  { id: createConstituencyUuid("New Juaben South"), name: "New Juaben South", code: "E0501" },
+  { id: createConstituencyUuid("Nkawkaw"), name: "Nkawkaw", code: "E2901" },
+  { id: createConstituencyUuid("Nsawam-Adoagyiri"), name: "Nsawam-Adoagyiri", code: "E1001" },
+  { id: createConstituencyUuid("Okere"), name: "Okere", code: "E0801" },
+  { id: createConstituencyUuid("Suhum"), name: "Suhum", code: "E1101" },
+  { id: createConstituencyUuid("Upper Manya Krobo"), name: "Upper Manya Krobo", code: "E0301" },
+  { id: createConstituencyUuid("Upper West Akim"), name: "Upper West Akim", code: "E1401" },
+  { id: createConstituencyUuid("West Akim"), name: "West Akim", code: "E1301" },
+  { id: createConstituencyUuid("Yilo Krobo"), name: "Yilo Krobo", code: "E0401" },
 ];
 
 export const DEMO_CONSTITUENCIES = EASTERN_REGION_CONSTITUENCIES;
@@ -95,11 +116,14 @@ const DEFAULT_DEMO_USERS: DemoUser[] = [
 
 export const DEMO_USERS = DEFAULT_DEMO_USERS;
 
+const constituencyId = (name: string) =>
+  EASTERN_REGION_CONSTITUENCIES.find((constituency) => constituency.name.toLowerCase() === name.toLowerCase())?.id ?? createConstituencyUuid(name);
+
 const DEMO_RECORDS: DemoRecord[] = [
   {
     id: "record-1",
     full_name: "Akua Boateng",
-    constituency_id: "constituency_1",
+    constituency_id: constituencyId("Akwatia"),
     constituency_name: "Akwatia",
     phone: "+233244123456",
     gender: "female",
@@ -112,8 +136,8 @@ const DEMO_RECORDS: DemoRecord[] = [
   {
     id: "record-2",
     full_name: "Kwame Owusu",
-    constituency_id: "constituency_2",
-    constituency_name: "Abiribi",
+    constituency_id: constituencyId("Abirem"),
+    constituency_name: "Abirem",
     phone: "+233501234567",
     gender: "male",
     verification_status: "pending",
@@ -125,7 +149,7 @@ const DEMO_RECORDS: DemoRecord[] = [
   {
     id: "record-3",
     full_name: "Esi Danso",
-    constituency_id: "constituency_3",
+    constituency_id: constituencyId("Koforidua Central"),
     constituency_name: "Koforidua Central",
     phone: "+233542345678",
     gender: "female",
@@ -138,7 +162,7 @@ const DEMO_RECORDS: DemoRecord[] = [
   {
     id: "record-4",
     full_name: "Yaw Addo",
-    constituency_id: "constituency_4",
+    constituency_id: constituencyId("New Juaben South"),
     constituency_name: "New Juaben South",
     phone: "+233277890123",
     gender: "male",
@@ -151,7 +175,7 @@ const DEMO_RECORDS: DemoRecord[] = [
   {
     id: "record-5",
     full_name: "Mabel Tetteh",
-    constituency_id: "constituency_5",
+    constituency_id: constituencyId("Nsawam-Adoagyiri"),
     constituency_name: "Nsawam-Adoagyiri",
     phone: "+233246789012",
     gender: "female",
@@ -164,7 +188,7 @@ const DEMO_RECORDS: DemoRecord[] = [
   {
     id: "record-6",
     full_name: "Naa Abeka",
-    constituency_id: "constituency_1",
+    constituency_id: constituencyId("Akwatia"),
     constituency_name: "Akwatia",
     phone: "+233556677889",
     gender: "female",
@@ -177,8 +201,8 @@ const DEMO_RECORDS: DemoRecord[] = [
   {
     id: "record-7",
     full_name: "Samuel Boadu",
-    constituency_id: "constituency_2",
-    constituency_name: "Abiribi",
+    constituency_id: constituencyId("Abirem"),
+    constituency_name: "Abirem",
     phone: "+233249876543",
     gender: "male",
     verification_status: "verified",
@@ -190,7 +214,7 @@ const DEMO_RECORDS: DemoRecord[] = [
   {
     id: "record-8",
     full_name: "Felicia Aidoo",
-    constituency_id: "constituency_3",
+    constituency_id: constituencyId("Koforidua Central"),
     constituency_name: "Koforidua Central",
     phone: "+233242938475",
     gender: "female",
@@ -203,7 +227,7 @@ const DEMO_RECORDS: DemoRecord[] = [
   {
     id: "record-9",
     full_name: "Michael Kusi",
-    constituency_id: "constituency_4",
+    constituency_id: constituencyId("New Juaben South"),
     constituency_name: "New Juaben South",
     phone: "+233207654321",
     gender: "male",
@@ -216,7 +240,7 @@ const DEMO_RECORDS: DemoRecord[] = [
   {
     id: "record-10",
     full_name: "Efua Kwarteng",
-    constituency_id: "constituency_5",
+    constituency_id: constituencyId("Nsawam-Adoagyiri"),
     constituency_name: "Nsawam-Adoagyiri",
     phone: "+233559988776",
     gender: "female",
@@ -256,6 +280,24 @@ export function clearDemoSession() {
   window.localStorage.removeItem(DEMO_SESSION_KEY);
 }
 
+function sanitizeDemoRecord(record: DemoRecord): DemoRecord {
+  const match = DEMO_CONSTITUENCIES.find((constituency) => {
+    const sameId = constituency.id === record.constituency_id;
+    const sameName = constituency.name.toLowerCase() === (record.constituency_name || "").trim().toLowerCase();
+    return sameId || sameName;
+  });
+
+  if (!match) {
+    return record;
+  }
+
+  return {
+    ...record,
+    constituency_id: match.id,
+    constituency_name: match.name,
+  };
+}
+
 export function getDemoRecords(): DemoRecord[] {
   if (typeof window === "undefined") {
     return DEMO_RECORDS;
@@ -268,17 +310,12 @@ export function getDemoRecords(): DemoRecord[] {
   }
 
   try {
-    return JSON.parse(raw) as DemoRecord[];
-  } catch {
-    return DEMO_RECORDS;
-  }
-}
-
-export function notifyDemoRecordsChanged() {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent("election-delegate-records-changed"));
-}
-
+    const parsed = JSON.parse(raw) as DemoRecord[];
+    const sanitized = parsed.map(sanitizeDemoRecord);
+    if (JSON.stringify(sanitized) !== JSON.stringify(parsed)) {
+      window.localStorage.setItem(DEMO_RECORDS_KEY, JSON.stringify(sanitized));
+    }
+    return sanitized;
 export function saveDemoRecords(records: DemoRecord[]) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(DEMO_RECORDS_KEY, JSON.stringify(records));
